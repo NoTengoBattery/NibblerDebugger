@@ -19,6 +19,7 @@ Copyright (c) 2016 Oever González
 import sys
 from curses import *
 from math import floor
+from time import sleep
 
 from ensamblador import ensamblar
 from ensamblador_reverso import decodificar_datos, disasm
@@ -26,6 +27,9 @@ from receptor import *
 
 min_x = 90
 min_y = 28
+
+l_cmd_enviado = ""
+l_disasm_enviado = ""
 
 
 def interface(pantalla):
@@ -38,9 +42,10 @@ def interface(pantalla):
         init_pair(1, COLOR_BLACK, COLOR_WHITE)
         init_pair(2, COLOR_CYAN, COLOR_BLACK)
         init_pair(3, COLOR_YELLOW, COLOR_BLUE)
-        init_pair(4, COLOR_YELLOW, COLOR_RED)
+        init_pair(4, COLOR_BLUE, COLOR_WHITE)
 
     pantalla.border(0)
+    pantalla.nodelay(1)
 
     # Calcula las dimensiones iniciales
     y_principal, x_principal = pantalla.getmaxyx()
@@ -68,79 +73,92 @@ def interface(pantalla):
     def val3op(cond, val_si, val_no):
         return val_si if cond else val_no
 
+    def val3opb(no, cmpr, val_si, val_no, bits):
+        ret = []
+        for i in range(bits):
+            ret.append(val_si if (no >> i & 1) == cmpr else val_no)
+        return ret
+
     def rewrite():
+        global l_cmd_enviado
+        global l_disasm_enviado
         """
         Actualiza la información que se presenta en la pantalla.
         """
-        ventana_pc.addstr(1, 1, "PC: 0x{0:04X}".format(pc))
+        ventana_pc.addstr(1, 1, "PC: 0x{0:04X}, {0:02d}".format(pc))
         ventana_pc.addstr(2, 1, "FETCHD: I[0x{0:01X}] O[0x{1:01X}], 0x{2:02X}".format(ejec >> 4, ejec & 0xF, ejec))
-        ventana_pc.addstr(3, 1, "PROGBYTE: I[0x{0:01X}] O[0x{1:01X}]".format(progb >> 4, progb & 0xF))
-        ventana_pc.addstr(4, 1, "FASE: {0:s}".format("OBTENIENDO" if fase == 0 else "EJECUTANDO"))
+        ventana_pc.addstr(3, 1, "PROGBYTE: I[0x{0:01X}] O[0x{1:01X}], 0x{2:02X}".format(progb >> 4, progb & 0xF, progb))
+        ventana_pc.addstr(4, 1, "FASE: {0:s}".format(val3op(fase, "EJECUTANDO", "OBTENIENDO")))
 
         ventana_datos.addstr(1, 1, "DATOS: 0x{0:02X}".format(datos))
         ventana_datos.addstr(2, 1, "BOTONES: 0x{0:02X}".format(boton))
         ventana_datos.addstr(3, 1, "| LEFT|RIGHT| DOWN|  UP |", A_BOLD | color_pair(3))
-        ventana_datos.addstr(4, 1, "| {0:s} ".format("_=_" if boton >> 0 & 1 == 0 else "___"),
-                             A_BOLD | color_pair(3 if boton >> 0 & 1 == 0 else 4))
-        ventana_datos.addstr("| {0:s} ".format("_=_" if boton >> 1 & 1 == 0 else "___"),
-                             A_BOLD | color_pair(3 if boton >> 1 & 1 == 0 else 4))
-        ventana_datos.addstr("| {0:s} ".format("_=_" if boton >> 2 & 1 == 0 else "___"),
-                             A_BOLD | color_pair(3 if boton >> 2 & 1 == 0 else 4))
-        ventana_datos.addstr("| {0:s} |".format("_=_" if boton >> 3 & 1 == 0 else "___"),
-                             A_BOLD | color_pair(3 if boton >> 3 & 1 == 0 else 4))
-        ventana_datos.addstr(5, 1, "ACCUMULADOR: 0x{0:02X}".format(accum))
+        botones_str = val3opb(boton, 0, "_=_", "___", 4)
+        ventana_datos.addstr(4, 1, "| {0:s} | {1:s} | {2:s} | {3:s} |".
+                             format(botones_str[0],
+                                    botones_str[1],
+                                    botones_str[2],
+                                    botones_str[3]),
+                             A_BOLD | color_pair(4))
+        ventana_datos.addstr(5, 1, "ACCUMULADOR: 0x{0:02X}, {0:02d}".format(accum))
         ventana_datos.addstr(6, 1, "SALIDA: 0x{0:02X}".format(salida))
 
         ventana_comandos.addstr(comando + "\n")
+        if disasm_enviado != l_disasm_enviado:
+            ventana_disasm.addstr(disasm_enviado)
+            l_disasm_enviado = disasm_enviado
 
-        ventana_disasm.addstr(disasm(pc, ejec, progb, fase, acarreo, cero))
+        micro0 = val3opb(u0, 0, "ACTIVADO", "DESACTIV", 8)
+        nmicro0 = val3opb(u0, 0, "DESACTIV", "ACTIVADO", 8)
+        ventana_banderas.addstr(3, 1, "{0:s}\t{1:s}\t{2:s}\t{3:s}".format(
+            micro0[0],
+            micro0[1],
+            micro0[2],
+            micro0[3]
+        ), A_BOLD | color_pair(4))
 
-        ventana_banderas.addstr(3, 1, "{0:s}\t".format("ACTIVADO" if u0 >> 0 & 1 == 0 else "DESACTIV"),
-                                A_BOLD | color_pair(3 if u0 >> 0 & 1 == 0 else 4))
-        ventana_banderas.addstr("{0:s}\t".format("ACTIVADO" if u0 >> 1 & 1 == 0 else "DESACTIV"),
-                                A_BOLD | color_pair(3 if u0 >> 1 & 1 == 0 else 4))
-        ventana_banderas.addstr("{0:s}\t".format("ACTIVADO" if u0 >> 2 & 1 == 0 else "DESACTIV"),
-                                A_BOLD | color_pair(3 if u0 >> 2 & 1 == 0 else 4))
-        ventana_banderas.addstr("{0:s}".format("ACTIVADO" if u0 >> 3 & 1 == 0 else "DESACTIV"),
-                                A_BOLD | color_pair(3 if u0 >> 3 & 1 == 0 else 4))
-        ventana_banderas.addstr(5, 1, "{0:s}\t".format("ACTIVADO" if u0 >> 4 & 1 == 0 else "DESACTIV"),
-                                A_BOLD | color_pair(3 if u0 >> 4 & 1 == 0 else 4))
-        ventana_banderas.addstr("{0:s}\t".format("ACTIVADO" if u0 >> 5 & 1 == 0 else "DESACTIV"),
-                                A_BOLD | color_pair(3 if u0 >> 5 & 1 == 0 else 4))
-        ventana_banderas.addstr("{0:s}\t".format("ACTIVADO" if u0 >> 6 & 1 == 1 else "DESACTIV"),
-                                A_BOLD | color_pair(3 if u0 >> 6 & 1 == 1 else 4))
-        ventana_banderas.addstr("{0:s}".format("ACTIVADO" if u0 >> 7 & 1 == 1 else "DESACTIV"),
-                                A_BOLD | color_pair(3 if u0 >> 7 & 1 == 1 else 4))
-        ventana_banderas.addstr(8, 1, "{0:s}\t".format("ACTIVADO" if u1 >> 0 & 1 == 1 else "DESACTIV"),
-                                A_BOLD | color_pair(3 if u1 >> 0 & 1 == 1 else 4))
-        ventana_banderas.addstr("{0:s}\t".format("ACTIVADO" if u1 >> 1 & 1 == 1 else "DESACTIV"),
-                                A_BOLD | color_pair(3 if u1 >> 1 & 1 == 1 else 4))
-        ventana_banderas.addstr("{0:s}\t".format("ACTIVADO" if u1 >> 2 & 1 == 1 else "DESACTIV"),
-                                A_BOLD | color_pair(3 if u1 >> 2 & 1 == 1 else 4))
-        ventana_banderas.addstr("{0:s}".format("ACTIVADO" if u1 >> 3 & 1 == 0 else "DESACTIV"),
-                                A_BOLD | color_pair(3 if u1 >> 3 & 1 == 0 else 4))
-        ventana_banderas.addstr(10, 1, "{0:s}\t".format("ACTIVADO" if u1 >> 4 & 1 == 0 else "DESACTIV"),
-                                A_BOLD | color_pair(3 if u1 >> 4 & 1 == 0 else 4))
-        ventana_banderas.addstr("{0:s}\t".format("ACTIVADO" if u1 >> 5 & 1 == 0 else "DESACTIV"),
-                                A_BOLD | color_pair(3 if u1 >> 5 & 1 == 0 else 4))
-        ventana_banderas.addstr("{0:s}\t".format("ACTIVADO" if u1 >> 6 & 1 == 0 else "DESACTIV"),
-                                A_BOLD | color_pair(3 if u1 >> 6 & 1 == 0 else 4))
-        ventana_banderas.addstr("{0:s}".format("ACTIVADO" if u1 >> 7 & 1 == 1 else "DESACTIV"),
-                                A_BOLD | color_pair(3 if u1 >> 7 & 1 == 1 else 4))
-        ventana_banderas.addstr(11, 1, "CERO: {0:d},\tACARREO: {1:d},\tFASE: {2:d},\tRESET: {3:d}"
-                                .format(cero, acarreo, fase, reset), A_BOLD)
+        ventana_banderas.addstr(5, 1, "{0:s}\t{1:s}\t{2:s}\t{3:s}".format(
+            micro0[4],
+            micro0[5],
+            nmicro0[6],
+            nmicro0[7]
+        ), A_BOLD | color_pair(4))
 
-        ventana_entrada.addstr((str(chr(cmd)) if cmd > 0 else "INV") + "|", A_BOLD | color_pair(2))
+        micro1 = val3opb(u1, 0, "ACTIVADO", "DESACTIV", 8)
+        nmicro1 = val3opb(u1, 0, "DESACTIV", "ACTIVADO", 8)
+
+        ventana_banderas.addstr(8, 1, "{0:s}\t{1:s}\t{2:s}\t{3:s}".format(
+            nmicro1[0],
+            nmicro1[1],
+            nmicro1[2],
+            micro1[3]
+        ), A_BOLD | color_pair(4))
+
+        ventana_banderas.addstr(10, 1, "{0:s}\t{1:s}\t{2:s}\t{3:s}".format(
+            micro1[4],
+            micro1[5],
+            micro1[6],
+            nmicro1[7]
+        ), A_BOLD | color_pair(4))
+        ventana_banderas.addstr(11, 1, "CERO: {0:s},\tACARREO: {1:s},\tFASE: {2:s},\tRESET: {3:s}"
+                                .format(val3op(cero, "Sí", "No"),
+                                        val3op(acarreo, "Sí", "No"),
+                                        val3op(fase, "Sí", "No"),
+                                        val3op(reset, "Sí", "No")), A_BOLD)
+
+        if cmd_enviado != l_cmd_enviado:
+            ventana_entrada.addstr("{0:s}\n".format(cmd_enviado), A_BOLD)
+            l_cmd_enviado = cmd_enviado
 
     key = KEY_RESIZE
+    enviado_arduino = deque([])  # type: deque
     datosio = deque([])
     datosio.extend(abrir_puerto(puerto, baud, str(modo)))
-    tmpio = datosio.popleft()
-    datosio.appendleft(tmpio)
-    cmd, comando, datos, pc, ejec, u0, u1, cero, acarreo, \
-    fase, reset, boton, progb, accum, salida = decodificar_datos(tmpio)
+    comando = datos = pc = ejec = u0 = u1 = cero = acarreo = fase = reset = boton = progb = accum = salida = 0
+    cmd_enviado = "Inicializando..."
+    disasm_enviado = ""
     while key != ord('q'):
-        if key != -1 or len(datosio) > 0:
+        if key != -1 or len(datosio) > 0 or len(enviado_arduino) > 0:
             if key == KEY_RESIZE:
                 y_principal, x_principal = pantalla.getmaxyx()
                 # Configura los mínimos absolutos y calcula la ventana principal
@@ -219,7 +237,11 @@ def interface(pantalla):
                 for i in range(len(datosio)):
                     cmd, comando, datos, pc, ejec, u0, u1, \
                     cero, acarreo, fase, reset, boton, progb, accum, salida = decodificar_datos(datosio.popleft())
-                rewrite()
+                    for j in range(len(enviado_arduino)):
+                        cmd_enviado = enviado_arduino.popleft()
+                        disasm_enviado = disasm(pc, ejec, progb, fase, acarreo, cero)
+                        rewrite()
+                    rewrite()
             if key == KEY_RESIZE:
                 rewrite()
 
@@ -243,30 +265,45 @@ def interface(pantalla):
         echo(True)
 
         key = pantalla.getch()
+        indata = leer_puerto()
+        sleep(0.075)
+        if indata:
+            datosio.append(indata)
 
         # Teclas que se envían automáticamente
         if key == ord('r') or key == ord('R'):
             datosio.extend(escribir_puerto('R'))
+            enviado_arduino.append("R")
             key = -1
         elif key == ord('o') or key == ord('O'):
             datosio.extend(escribir_puerto('O'))
+            enviado_arduino.append("O")
             key = -1
         elif key == ord('c') or key == ord('C'):
             datosio.extend(escribir_puerto('C'))
+            enviado_arduino.append("C")
             key = -1
         elif key == ord('p') or key == ord('P'):
             datosio.extend(escribir_puerto('P'))
+            enviado_arduino.append("P")
             key = -1
         elif key == ord('b') or key == ord('B'):
-            char1 = chr(pantalla.getch())
-            char2 = chr(pantalla.getch())
-            val = int(char1 + char2)
+            pantalla.nodelay(0)
+            val = int(pantalla.getstr())
+            pantalla.nodelay(1)
             datosio.extend(escribir_puerto("B " + str(val)))
+            enviado_arduino.append("B " + str(val))
             key = -1
         elif (key == ord('i') or key == ord('I')) and modo == 1:
-            instr = pantalla.getstr(0, 0, 15)
-            asmed, larga = ensamblar(instr)
+            pantalla.nodelay(0)
+            instr = pantalla.getstr()
+            pantalla.nodelay(1)
+            try:
+                asmed, larga = ensamblar(instr)
+            except:
+                ventana_entrada.addstr("Instrucción inválida", A_BOLD | color_pair(4))
             datosio.extend(escribir_puerto("I " + str(asmed) + " " + str(larga)))
+            enviado_arduino.append("I " + str(asmed) + " " + str(larga))
             key = -1
 
 

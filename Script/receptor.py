@@ -85,7 +85,7 @@ def abrir_puerto(archivo, baud, modo):
     # Cambia el modo a bloqueador del hilo
     serial_tmp.timeout = None
     # Lee un byte que envía Arduino cuando la conexión está lista
-    initchr = ord(serial_tmp.read(0))
+    initchr = ord(serial_tmp.read(1))
     if initchr != 64:
         raise IOError("El depurador de Arduino no respondió correctamente a la inicialización. Verifique la conexión "
                       "y que Arduino esté ejecutando el programa correcto.")

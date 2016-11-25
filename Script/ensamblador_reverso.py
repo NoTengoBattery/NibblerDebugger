@@ -137,6 +137,6 @@ def disasm(addr, fetch, progb, fase, carry, cero):
     if usa_carry == 1:
         retorno += "[C: {0:s}]".format("Sí" if carry else "No")
     if usa_cero:
-        retorno += "[Z: {0:s}]".format(cero)
+        retorno += "[Z: {0:s}]".format("Sí" if carry else "No")
     retorno += '\n'
     return retorno
